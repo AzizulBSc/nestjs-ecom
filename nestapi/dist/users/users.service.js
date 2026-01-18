@@ -77,10 +77,26 @@ let UsersService = class UsersService {
         }
         return this.usersRepository.save(user);
     }
-    async findAll() {
-        return this.usersRepository.find({
-            relations: ['role', 'role.permissions'],
-        });
+    async findAll(page = 1, limit = 10, search) {
+        const skip = (page - 1) * limit;
+        const queryBuilder = this.usersRepository
+            .createQueryBuilder('user')
+            .leftJoinAndSelect('user.role', 'role')
+            .leftJoinAndSelect('role.permissions', 'permissions');
+        if (search) {
+            queryBuilder.where('(user.firstName LIKE :search OR user.lastName LIKE :search OR user.email LIKE :search)', { search: `%${search}%` });
+        }
+        const [data, total] = await queryBuilder
+            .skip(skip)
+            .take(limit)
+            .getManyAndCount();
+        return {
+            data,
+            total,
+            page,
+            limit,
+            totalPages: Math.ceil(total / limit),
+        };
     }
     async findOne(id) {
         const user = await this.usersRepository.findOne({
