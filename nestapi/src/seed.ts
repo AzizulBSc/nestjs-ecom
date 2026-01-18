@@ -5,6 +5,7 @@ import { Role, RoleType } from './roles/entities/role.entity';
 import { Permission } from './roles/entities/permission.entity';
 import { User } from './users/entities/user.entity';
 import * as bcrypt from 'bcrypt';
+import { faker } from '@faker-js/faker';
 
 async function seedDatabase() {
   const app = await NestFactory.createApplicationContext(AppModule);
@@ -136,6 +137,46 @@ async function seedDatabase() {
       );
     } else {
       console.log('ℹ️  Admin user already exists');
+    }
+
+    // Seed 5000 Users
+    console.log('⏳ Seeding 5000 users...');
+    const usersToCreate = 5000;
+    const batchSize = 500; // Save in batches of 500
+    const defaultPassword = await bcrypt.hash('password123', 10); // Hash once for performance
+
+    let usersBatch: User[] = [];
+
+    for (let i = 0; i < usersToCreate; i++) {
+      const firstName = faker.person.firstName();
+      const lastName = faker.person.lastName();
+      const email = faker.internet.email({ firstName, lastName });
+
+      const user = usersRepo.create({
+        email: email,
+        password: defaultPassword,
+        firstName: firstName,
+        lastName: lastName,
+        phone: faker.phone.number(),
+        isActive: true,
+        role: userRole,
+      });
+
+      usersBatch.push(user);
+
+      if (usersBatch.length >= batchSize) {
+        await usersRepo.save(usersBatch, { listeners: false });
+        console.log(
+          `✅ Saved batch of ${batchSize} users (${i + 1}/${usersToCreate})`,
+        );
+        usersBatch = [];
+      }
+    }
+
+    // Save remaining users
+    if (usersBatch.length > 0) {
+      await usersRepo.save(usersBatch, { listeners: false });
+      console.log(`✅ Saved final batch of ${usersBatch.length} users`);
     }
 
     console.log('\n🎉 Database seeding completed successfully!');

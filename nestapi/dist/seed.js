@@ -40,6 +40,7 @@ const role_entity_1 = require("./roles/entities/role.entity");
 const permission_entity_1 = require("./roles/entities/permission.entity");
 const user_entity_1 = require("./users/entities/user.entity");
 const bcrypt = __importStar(require("bcrypt"));
+const faker_1 = require("@faker-js/faker");
 async function seedDatabase() {
     const app = await core_1.NestFactory.createApplicationContext(app_module_1.AppModule);
     const dataSource = app.get(typeorm_1.DataSource);
@@ -145,6 +146,35 @@ async function seedDatabase() {
         }
         else {
             console.log('ℹ️  Admin user already exists');
+        }
+        console.log('⏳ Seeding 5000 users...');
+        const usersToCreate = 5000;
+        const batchSize = 500;
+        const defaultPassword = await bcrypt.hash('password123', 10);
+        let usersBatch = [];
+        for (let i = 0; i < usersToCreate; i++) {
+            const firstName = faker_1.faker.person.firstName();
+            const lastName = faker_1.faker.person.lastName();
+            const email = faker_1.faker.internet.email({ firstName, lastName });
+            const user = usersRepo.create({
+                email: email,
+                password: defaultPassword,
+                firstName: firstName,
+                lastName: lastName,
+                phone: faker_1.faker.phone.number(),
+                isActive: true,
+                role: userRole,
+            });
+            usersBatch.push(user);
+            if (usersBatch.length >= batchSize) {
+                await usersRepo.save(usersBatch, { listeners: false });
+                console.log(`✅ Saved batch of ${batchSize} users (${i + 1}/${usersToCreate})`);
+                usersBatch = [];
+            }
+        }
+        if (usersBatch.length > 0) {
+            await usersRepo.save(usersBatch, { listeners: false });
+            console.log(`✅ Saved final batch of ${usersBatch.length} users`);
         }
         console.log('\n🎉 Database seeding completed successfully!');
     }

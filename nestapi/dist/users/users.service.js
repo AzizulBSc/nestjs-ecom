@@ -100,7 +100,7 @@ let UsersService = class UsersService {
     }
     async update(id, updateUserDto) {
         if (updateUserDto.password && updateUserDto.password.length < 6) {
-            throw new common_1.ConflictException("Password must be at least 6 characters long");
+            throw new common_1.ConflictException('Password must be at least 6 characters long');
         }
         const user = await this.findOne(id);
         if (updateUserDto.email && updateUserDto.email !== user.email) {

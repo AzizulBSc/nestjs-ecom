@@ -70,9 +70,10 @@ export class UsersService {
   }
 
   async update(id: number, updateUserDto: UpdateUserDto): Promise<User> {
-    
     if (updateUserDto.password && updateUserDto.password.length < 6) {
-     throw new ConflictException("Password must be at least 6 characters long");
+      throw new ConflictException(
+        'Password must be at least 6 characters long',
+      );
     }
 
     const user = await this.findOne(id);
