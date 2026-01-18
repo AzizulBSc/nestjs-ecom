@@ -4,6 +4,10 @@ import { DataSource } from 'typeorm';
 import { Role, RoleType } from './roles/entities/role.entity';
 import { Permission } from './roles/entities/permission.entity';
 import { User } from './users/entities/user.entity';
+import { Category } from './categories/entities/category.entity';
+import { Product } from './products/entities/product.entity';
+import { Order, OrderStatus } from './orders/entities/order.entity';
+import { OrderItem } from './orders/entities/order-item.entity';
 import * as bcrypt from 'bcrypt';
 import { faker } from '@faker-js/faker';
 
@@ -12,6 +16,22 @@ async function seedDatabase() {
   const dataSource = app.get(DataSource);
 
   try {
+    console.log('🗑️  Clearing existing data...\n');
+
+    // Clear data in correct order (respecting foreign key constraints)
+    await dataSource.query('SET FOREIGN_KEY_CHECKS = 0');
+    await dataSource.getRepository('OrderItem').clear();
+    await dataSource.getRepository('Order').clear();
+    await dataSource.getRepository('Product').clear();
+    await dataSource.getRepository('Category').clear();
+    await dataSource.getRepository('User').clear();
+    await dataSource.query('DELETE FROM `role_permissions`');
+    await dataSource.getRepository('Role').clear();
+    await dataSource.getRepository('Permission').clear();
+    await dataSource.query('SET FOREIGN_KEY_CHECKS = 1');
+
+    console.log('✅ All existing data cleared\n');
+
     // Create Permissions
     const permissionsData = [
       { name: 'users.create', description: 'Create users', module: 'users' },
@@ -48,13 +68,8 @@ async function seedDatabase() {
     const permissions: Permission[] = [];
 
     for (const permData of permissionsData) {
-      let permission = await permissionsRepo.findOne({
-        where: { name: permData.name },
-      });
-      if (!permission) {
-        permission = permissionsRepo.create(permData);
-        await permissionsRepo.save(permission);
-      }
+      const permission = permissionsRepo.create(permData);
+      await permissionsRepo.save(permission);
       permissions.push(permission);
     }
 
@@ -64,80 +79,59 @@ async function seedDatabase() {
     const rolesRepo = dataSource.getRepository(Role);
 
     // Admin role with all permissions
-    let adminRole = await rolesRepo.findOne({
-      where: { name: RoleType.ADMIN },
+    const adminRole = rolesRepo.create({
+      name: RoleType.ADMIN,
+      description: 'Administrator with full access',
+      permissions: permissions,
     });
-    if (!adminRole) {
-      adminRole = rolesRepo.create({
-        name: RoleType.ADMIN,
-        description: 'Administrator with full access',
-        permissions: permissions,
-      });
-      await rolesRepo.save(adminRole);
-    }
+    await rolesRepo.save(adminRole);
 
     // Manager role with limited permissions
-    let managerRole = await rolesRepo.findOne({
-      where: { name: RoleType.MANAGER },
+    const managerRole = rolesRepo.create({
+      name: RoleType.MANAGER,
+      description: 'Manager with limited access',
+      permissions: permissions.filter(
+        (p) =>
+          p.name.includes('read') ||
+          p.name.includes('update') ||
+          p.name.includes('products') ||
+          p.name.includes('orders'),
+      ),
     });
-    if (!managerRole) {
-      managerRole = rolesRepo.create({
-        name: RoleType.MANAGER,
-        description: 'Manager with limited access',
-        permissions: permissions.filter(
-          (p) =>
-            p.name.includes('read') ||
-            p.name.includes('update') ||
-            p.name.includes('products') ||
-            p.name.includes('orders'),
-        ),
-      });
-      await rolesRepo.save(managerRole);
-    }
+    await rolesRepo.save(managerRole);
 
     // User role with basic permissions
-    let userRole = await rolesRepo.findOne({ where: { name: RoleType.USER } });
-    if (!userRole) {
-      userRole = rolesRepo.create({
-        name: RoleType.USER,
-        description: 'Regular user with basic access',
-        permissions: permissions.filter(
-          (p) =>
-            p.name === 'products.read' ||
-            p.name === 'orders.create' ||
-            p.name === 'orders.read',
-        ),
-      });
-      await rolesRepo.save(userRole);
-    }
+    const userRole = rolesRepo.create({
+      name: RoleType.USER,
+      description: 'Regular user with basic access',
+      permissions: permissions.filter(
+        (p) =>
+          p.name === 'products.read' ||
+          p.name === 'orders.create' ||
+          p.name === 'orders.read',
+      ),
+    });
+    await rolesRepo.save(userRole);
 
     console.log('✅ Roles created');
 
     // Create Admin User
     const usersRepo = dataSource.getRepository(User);
-    let adminUser = await usersRepo.findOne({
-      where: { email: 'admin@example.com' },
+    const hashedPassword = await bcrypt.hash('admin123456', 10);
+    const adminUser = usersRepo.create({
+      email: 'admin@example.com',
+      password: hashedPassword,
+      firstName: 'Admin',
+      lastName: 'User',
+      phone: '+1234567890',
+      isActive: true,
+      role: adminRole,
     });
-
-    if (!adminUser) {
-      const hashedPassword = await bcrypt.hash('admin123456', 10);
-      adminUser = usersRepo.create({
-        email: 'admin@example.com',
-        password: hashedPassword,
-        firstName: 'Admin',
-        lastName: 'User',
-        phone: '+1234567890',
-        isActive: true,
-        role: adminRole,
-      });
-      // Use { listeners: false } to skip BeforeInsert hook since password is already hashed
-      await usersRepo.save(adminUser, { listeners: false });
-      console.log(
-        '✅ Admin user created (email: admin@example.com, password: admin123456)',
-      );
-    } else {
-      console.log('ℹ️  Admin user already exists');
-    }
+    // Use { listeners: false } to skip BeforeInsert hook since password is already hashed
+    await usersRepo.save(adminUser, { listeners: false });
+    console.log(
+      '✅ Admin user created (email: admin@example.com, password: admin123456)',
+    );
 
     // Seed 5000 Users
     console.log('⏳ Seeding 5000 users...');
@@ -178,6 +172,145 @@ async function seedDatabase() {
       await usersRepo.save(usersBatch, { listeners: false });
       console.log(`✅ Saved final batch of ${usersBatch.length} users`);
     }
+
+    // Seed Categories
+    console.log('\n⏳ Seeding categories...');
+    const categoriesRepo = dataSource.getRepository(Category);
+    const categoryNames = [
+      'Electronics',
+      'Clothing',
+      'Books',
+      'Home & Kitchen',
+      'Sports & Outdoors',
+      'Toys & Games',
+      'Beauty & Personal Care',
+      'Automotive',
+      'Health & Wellness',
+      'Jewelry & Accessories',
+      'Food & Beverages',
+      'Pet Supplies',
+      'Office Products',
+      'Garden & Outdoor',
+      'Musical Instruments',
+    ];
+
+    const categories: Category[] = [];
+    for (const catName of categoryNames) {
+      const category = categoriesRepo.create({
+        name: catName,
+        description: faker.commerce.productDescription(),
+        image: faker.image.url(),
+        isActive: true,
+      });
+      await categoriesRepo.save(category);
+      categories.push(category);
+    }
+    console.log(`✅ Created ${categories.length} categories`);
+
+    // Seed Products
+    console.log('\n⏳ Seeding 1000 products...');
+    const productsRepo = dataSource.getRepository(Product);
+    const productsToCreate = 1000;
+    const productBatchSize = 200;
+    let productsBatch: Product[] = [];
+
+    for (let i = 0; i < productsToCreate; i++) {
+      const randomCategory =
+        categories[Math.floor(Math.random() * categories.length)];
+
+      const product = productsRepo.create({
+        name: faker.commerce.productName(),
+        description: faker.commerce.productDescription(),
+        price: parseFloat(faker.commerce.price({ min: 10, max: 1000 })),
+        stock: faker.number.int({ min: 0, max: 500 }),
+        image: faker.image.url(),
+        sku: faker.string.alphanumeric(10).toUpperCase(),
+        category: randomCategory,
+        isActive: true,
+      });
+
+      productsBatch.push(product);
+
+      if (productsBatch.length >= productBatchSize) {
+        await productsRepo.save(productsBatch);
+        console.log(
+          `✅ Saved batch of ${productBatchSize} products (${i + 1}/${productsToCreate})`,
+        );
+        productsBatch = [];
+      }
+    }
+
+    if (productsBatch.length > 0) {
+      await productsRepo.save(productsBatch);
+      console.log(`✅ Saved final batch of ${productsBatch.length} products`);
+    }
+
+    // Get all products for order creation
+    const allProducts = await productsRepo.find();
+
+    // Seed Orders
+    console.log('\n⏳ Seeding 2000 orders...');
+    const ordersRepo = dataSource.getRepository(Order);
+    const orderItemsRepo = dataSource.getRepository(OrderItem);
+    const ordersToCreate = 2000;
+    const orderBatchSize = 100;
+
+    // Get all users for order creation
+    const allUsers = await usersRepo.find();
+
+    for (let i = 0; i < ordersToCreate; i++) {
+      const randomUser = allUsers[Math.floor(Math.random() * allUsers.length)];
+      const orderStatuses = Object.values(OrderStatus);
+      const randomStatus =
+        orderStatuses[Math.floor(Math.random() * orderStatuses.length)];
+
+      // Create order
+      const order = ordersRepo.create({
+        orderNumber: `ORD-${faker.string.numeric(8)}`,
+        user: randomUser,
+        totalAmount: 0, // Will calculate after items
+        status: randomStatus,
+        shippingAddress: faker.location.streetAddress({ useFullAddress: true }),
+        notes: faker.helpers.maybe(() => faker.lorem.sentence(), {
+          probability: 0.3,
+        }),
+      });
+
+      await ordersRepo.save(order);
+
+      // Create 1-5 order items
+      const itemCount = faker.number.int({ min: 1, max: 5 });
+      let orderTotal = 0;
+
+      for (let j = 0; j < itemCount; j++) {
+        const randomProduct =
+          allProducts[Math.floor(Math.random() * allProducts.length)];
+        const quantity = faker.number.int({ min: 1, max: 5 });
+        const price = randomProduct.price;
+        const subtotal = quantity * Number(price);
+
+        const orderItem = orderItemsRepo.create({
+          order: order,
+          product: randomProduct,
+          quantity: quantity,
+          price: price,
+          subtotal: subtotal,
+        });
+
+        await orderItemsRepo.save(orderItem);
+        orderTotal += subtotal;
+      }
+
+      // Update order total
+      order.totalAmount = orderTotal;
+      await ordersRepo.save(order);
+
+      if ((i + 1) % orderBatchSize === 0) {
+        console.log(`✅ Created ${i + 1}/${ordersToCreate} orders`);
+      }
+    }
+
+    console.log(`✅ Created ${ordersToCreate} orders with items`);
 
     console.log('\n🎉 Database seeding completed successfully!');
   } catch (error) {
